@@ -1,0 +1,109 @@
+#!/usr/bin/python3
+
+import os
+import pathlib
+import sys
+import socket
+import csv
+from datetime import datetime
+
+def printDiskUsage(user=os.environ['USER']):
+    if socket.gethostname() == 'hex':
+        basedir = '/srv/cluster-config/quota'
+    else:
+        basedir = '/mnt/cluster-config/quota'
+
+    lastDay  = os.path.join(os.path.expanduser('~'), '.QUOTA_YESTERDAY.csv')
+    oldDate  = datetime(1,1,1)
+    currDate = datetime.today()
+
+    used     = {}
+    usedPrev = {}
+    if os.path.exists(lastDay):
+        reader = csv.reader(open(lastDay), delimiter=',')
+        for row in reader:
+            usedPrev[row[0]] = row[1]
+        oldDate = datetime.strptime(usedPrev['date'].split(".")[0], '%Y-%m-%d %H:%M:%S')
+
+    print("Node     Used    Quota    Percent  1-Day")
+    for filename in sorted(pathlib.Path(basedir).glob('*')):
+        node = filename.name
+        oldUsed_TB = 0.0
+        if node in usedPrev.keys():
+            oldUsed_TB = getTB(usedPrev[node])
+
+        for line in filename.read_text().split('\n'):
+            if user in line:
+                _, _, _, used[node], quota, objused, objquota = line.split()
+                if quota != 'none':
+                    used_TB   = getTB(used[node])
+                    quota_TB  = getTB(quota)
+                    used_perc = round(used_TB / quota_TB * 100,2)
+
+                    # Get colors to print
+                    if used_TB/quota_TB <= 0.25:
+                        color = '\x1b[1;32m' # Green
+                    elif 0.25 < used_TB/quota_TB <= 0.50:
+                        color = '\x1b[1;37m' # White
+                    elif 0.50 < used_TB/quota_TB <= 0.75:
+                        color = '\x1b[1;33m' # Yellow
+                    elif 0.75 < used_TB/quota_TB:
+                        color = '\x1b[1;31m' # Red
+
+                    # Compute change with respect to a day ago and get color
+                    deltaGB = round((used_TB-oldUsed_TB)*1024,3)
+                    if deltaGB > 0:
+                        diff_TB = '+' + str(deltaGB) + 'G'
+                        color_Delta = '\x1b[1;33m' # Yellow
+                    elif deltaGB == 0:
+                        diff_TB = '+0.0G'
+                        color_Delta = '\x1b[1;37m' # White
+                    else:
+                        diff_TB = '-' + str(-deltaGB) + 'G'
+                        color_Delta = '\x1b[1;34m' # Blue
+
+                    print(color + '{:8s} {:7s} {:8s} {:>5}%'.format(node,used[node],quota,used_perc) +  color_Delta + '   {:8s}'.format(diff_TB) + '\x1b[0m')
+
+                    break
+
+    diffDate = currDate-oldDate
+    if diffDate.total_seconds() > 86400.0:
+        writer = csv.writer(open(lastDay, 'w'))
+        writer.writerow(['date', currDate])
+        for key, val in used.items():
+            writer.writerow([key, val])
+
+def getTB(quotaString):
+    """
+    Extracts used disk space from string and converts it to TB
+
+    Inputs  : string - quotaString
+    Outputs : double - quota_TB
+
+    Example :
+    1. getTB('121T')  -> 121
+    2. getTB('54.3G') -> 0.0543
+    """
+
+    if 'K' in quotaString:
+        quota_TB = float(quotaString[:-1])/1024**3
+    elif 'M' in quotaString:
+        quota_TB = float(quotaString[:-1])/1024**2
+    elif 'G' in quotaString:
+        quota_TB = float(quotaString[:-1])/1024**1
+    elif 'T' in quotaString:
+        quota_TB = float(quotaString[:-1])/1024**0
+    else:
+        raise ValueError('Could not extract unit from {:s}'.format(quotaString))
+
+    return quota_TB
+
+if __name__ == "__main__":
+
+    if len(sys.argv) > 1:
+        user = sys.argv[1]
+    else:
+        user = os.environ['USER']
+
+    printDiskUsage(user)
+

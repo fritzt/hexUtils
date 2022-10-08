@@ -1,0 +1,25 @@
+#!/usr/bin/python3
+
+import os
+import pathlib
+import sys
+import socket
+
+if socket.gethostname() == 'hex':
+    basedir = '/srv/cluster-config/quota'
+else:
+    basedir = '/mnt/cluster-config/quota'
+
+if len(sys.argv) > 1:
+    user = sys.argv[1]
+else:
+    user = os.environ['USER']
+
+print("Node     Used    Quota")
+for filename in sorted(pathlib.Path(basedir).glob('*')):
+    node = filename.name
+    for line in filename.read_text().split('\n'):
+        if user in line:
+            _, _, _, used, quota, objused, objquota = line.split()
+            print(f'{node:>4s} {used:>8s} {quota:>8s}')
+            break
